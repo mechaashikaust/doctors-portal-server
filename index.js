@@ -16,19 +16,106 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 
 async function run() {
     try {
-        
+
         await client.connect();
         const serviceCollection = client.db('doctors_portal').collection('services');
 
-        
-        app.get('/service', async(req, res) => {
+        // Booking Collection
+        const bookingCollection = client.db('doctors_portal').collection('bookings');
+
+        // app.get('/', async (req, res) => {
+
+        // })
+
+        app.get('/service', async (req, res) => {
             const query = {};
             const cursor = serviceCollection.find(query);
             const services = await cursor.toArray();
             res.send(services);
         })
 
-    } 
+
+        //Warning
+        // This is not the proper way to query. use aggregate lookup, pipeline, match, group
+
+        app.get('/available', async (req, res) => {
+            const date = req.query.date;
+
+            // step 1: get All services
+
+            const services = await serviceCollection.find().toArray();
+
+            //step 2: get the booking of that day [{},{},{},{},{},{},{}]
+
+            const query = { date: date };
+            const bookings = await bookingCollection.find(query).toArray();
+
+            // step 3: for each service, 
+
+            services.forEach(service => {
+
+                // step 4: find bookings for that service . Output: [{},{},{}]
+
+                const serviceBookings = bookings.filter(book => book.treatment === service.name);
+
+                // step 5: find slots for that serviceBookings . ['','','','']
+
+                const booked = serviceBookings.map(book => book.slot);
+
+                // step 6: Select those slots that are not in bookedSlots
+
+                const available = service.slots.filter(slot => !booked.includes(slot));
+
+                // Set available to slots to make it easier
+
+                service.slots = available;
+            })
+
+            res.send(services);
+
+        })
+
+        /*
+            * API Naming Convention
+
+            * app.get('/booking') // get all Bookings in this collection. or get more than one or by filter
+
+            * app.get('/booking/:id')   //  Get a specific Booking 
+
+            * app.post('/booking')      //  Add a new specific Booking
+        
+            * app.patch('/booking/:id)  //  Update a specific Booking
+
+            * app.delete('/booking/:id) //  Delete a specific Booking
+        */
+
+        app.get('/booking', async (req, res) => {
+            const patient = req.query.patient;
+            const query = { patient: patient };
+            const bookings = await bookingCollection.find(query).toArray();
+            res.send(bookings);
+        })
+
+
+        // {2}  Add a new specific Booking
+
+        app.post('/booking', async (req, res) => {
+            const booking = req.body;
+
+            // Let a Booking had done. I shouldn't apply a same booking again. 
+            // So, we will check that does the user booked an item before or not
+            const query = { treatment: booking.treatment, date: booking.date, patient: booking.patient }
+            const exists = await bookingCollection.findOne(query);
+            if (exists) {
+                return res.send({ success: false, booking: exists })
+            }
+
+
+            const result = await bookingCollection.insertOne(booking);
+            return res.send({ success: true, result });
+        })
+
+    }
 
     finally {
 
