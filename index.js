@@ -30,22 +30,26 @@ async function run() {
         // {4} My Appointemnts with verifying JWT
 
         function verifyJWT(req, res, next) {
-
+            //1///////////////////////////////////////
             const authHeader = req.headers.authorization;
 
+            //2///////////////////////////////////////
             if (!authHeader) {
                 return res.status(401).send({ message: 'UnAuthorized' });
             }
-
+            //3////////////////////////////////////////
             const token = authHeader.split(' ')[1];
 
+            //4////////////////////////////////////////
             jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, function (err, decoded) {
                 if (err) {
                     return res.status(403).send({ message: 'Forbidden Access' });
                 }
                 req.decoded = decoded;
 
+                //5/////////////////////////////////////////
                 next();
+
             });
 
         }
@@ -66,6 +70,45 @@ async function run() {
         })
 
 
+
+        // {7} Checking that are you admin or not
+        app.get('/admin/:email', async (req, res) => {
+            const email = req.params.email;
+            const user = await usersCollection.findOne({ email: email });
+            const isAdmin = user.role === 'admin';
+            res.send({ admin: isAdmin })
+        })
+
+
+        // {6} Admin
+
+        app.put('/user/admin/:email', verifyJWT, async (req, res) => {
+            const email = req.params.email;
+
+            const requester = req.decoded.email;
+            const requesterAccount = await usersCollection.findOne({ email: requester });
+            if (requesterAccount.role === 'admin') {
+
+                const filter = { email: email };
+                const updateDoc = {
+                    $set: { role: 'admin' },
+                };
+                const result = await usersCollection.updateOne(filter, updateDoc);
+
+                res.send({ result });
+
+            }
+            else {
+
+                return res.status(403).send({ message: 'Forbidden' });
+
+            }
+
+
+        })
+
+
+
         // {3} users set to the DB, can't login same email twice with 3 login methods (login, registratin, googlesignin)
 
         app.put('/user/:email', async (req, res) => {
@@ -81,6 +124,17 @@ async function run() {
 
             res.send({ result, token });
         })
+
+
+
+
+        // {5} get All Users
+
+        app.get('/user', verifyJWT, async (req, res) => {
+            const users = await usersCollection.find().toArray();
+            res.send(users);
+        })
+
 
         //Warning
         // This is not the proper way to query. use aggregate lookup, pipeline, match, group
@@ -143,9 +197,15 @@ async function run() {
 
         app.get('/booking', verifyJWT, async (req, res) => {
             const patient = req.query.patient;
-            const query = { patient: patient };
-            const bookings = await bookingCollection.find(query).toArray();
-            res.send(bookings);
+            const decodedEmail = req.decoded.email;
+            if (patient === decodedEmail) {
+                const query = { patient: patient };
+                const bookings = await bookingCollection.find(query).toArray();
+                return res.send(bookings);
+            }
+            else {
+                return res.status(403).send({ message: 'Forbidden Access' });
+            }
         })
 
 
