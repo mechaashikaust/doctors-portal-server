@@ -1,8 +1,9 @@
 const express = require('express')
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 var nodemailer = require('nodemailer');
 var sgTransport = require('nodemailer-sendgrid-transport');
+const stripe = require('stripe')('sk_test_51L27KODAkvG9mHY4dhbSwva03SNuTXSNAHklAOT0xXC2WpHqQKMIZnp5ZylhymUYjPC6GgOdAEB63GzujJNHcGKw00A0NfAIQU');
 
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
@@ -92,6 +93,39 @@ function sendAppointmentEmail(booking) {
 
 // Send GRID // END
 
+function sendPaymentConfirmationEmail(booking) {
+    const { patient, patientName, treatment, date, slot } = booking;
+  
+    var email = {
+      from: 'mechaashik@gmail.com',
+      to: patient,
+      subject: `We have received your payment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+      text: `Your payment for this Appointment ${treatment} is on ${date} at ${slot} is Confirmed`,
+      html: `
+        <div>
+          <p> Hello ${patientName}, </p>
+          <h3>Thank you for your payment . </h3>
+          <h3>We have received your payment</h3>
+          <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+          <h3>Our Address</h3>
+          <p>Andor Killa Bandorban</p>
+          <p>Bangladesh</p>
+          <a href="https://web.programming-hero.com/">unsubscribe</a>
+        </div>
+      `
+    };
+  
+    emailClient.sendMail(email, function (err, info) {
+      if (err) {
+        console.log(err);
+      }
+      else {
+        console.log('Message sent: ', info);
+      }
+    });
+  
+  }
+
 
 async function run() {
     try {
@@ -105,6 +139,8 @@ async function run() {
         const usersCollection = client.db('doctors_portal').collection('users');
         // Doctors Collection
         const doctorCollection = client.db('doctors_portal').collection('doctors');
+        // Payment Collection
+        const paymentCollection = client.db('doctors_portal').collection('payments');
 
 
         // Verifying admin for doctors         (after image uploading) 
@@ -129,6 +165,21 @@ async function run() {
         // app.get('/', async (req, res) => {
 
         // })
+
+
+        // {13} Calculate Order Amount (https://stripe.com/docs/payments/quickstart)
+
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const service = req.body;
+            const price = service.price;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            });
+            res.send({ clientSecret: paymentIntent.client_secret })
+        });
 
 
 
@@ -271,6 +322,15 @@ async function run() {
             }
         })
 
+        // {12} Get data for Payment route for a specific id.
+
+        app.get('/booking/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const booking = await bookingCollection.findOne(query);
+            res.send(booking);
+        })
+
 
         // {2}  Add a new specific Booking
 
@@ -293,6 +353,26 @@ async function run() {
 
             return res.send({ success: true, result });
         });
+
+
+        // {13} Payment Updating
+
+        app.patch('/booking/:id', verifyJWT, async(req, res) =>{
+            const id  = req.params.id;
+            const payment = req.body;
+            const filter = {_id: ObjectId(id)};
+            const updatedDoc = {
+              $set: {
+                paid: true,
+                transactionId: payment.transactionId
+              }
+            }
+      
+            const result = await paymentCollection.insertOne(payment);
+            const updatedBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            sendPaymentConfirmationEmail(booking);
+            res.send(updatedBooking);
+          })
 
 
         // {10} Getting all Doctors 
